@@ -1,0 +1,24 @@
+# NovaCart Pipeline Configuration
+pipeline:
+  name: novacart-etl
+
+paths:
+  landing_orders:   data/landing/orders
+  landing_customers: data/landing/customers
+  landing_products_db: data/landing/products.db
+  bronze: data/bronze
+  silver: data/silver
+  gold:   data/gold
+  quarantine: data/quarantine
+  logs:   logs
+  state:  state
+
+silver:
+  min_order_amount: 0.0
+  max_order_amount: 100000.0
+
+gold:
+  scd2_track_fields:
+    - city
+    - country
+    - email

@@ -1,0 +1,62 @@
+[
+  {
+    "customer_id": "CUST-001",
+    "first_name": "Alice",
+    "last_name": "Smith",
+    "email": "alice@example.com",
+    "address": {
+      "city": "New York",
+      "country": "US"
+    },
+    "signup_date": "2024-01-15",
+    "tier": "gold"
+  },
+  {
+    "customer_id": "CUST-002",
+    "first_name": "Bob",
+    "last_name": "Jones",
+    "email": "bob@example.com",
+    "address": {
+      "city": "London",
+      "country": "GB"
+    },
+    "signup_date": "2024-03-22",
+    "tier": "standard"
+  },
+  {
+    "customer_id": "CUST-003",
+    "first_name": "Carol",
+    "last_name": "White",
+    "email": "carol@example.com",
+    "address": {
+      "city": "Toronto",
+      "country": "CA"
+    },
+    "signup_date": "2023-11-05",
+    "tier": "silver"
+  },
+  {
+    "customer_id": "CUST-004",
+    "first_name": "Dan",
+    "last_name": "Brown",
+    "email": "dan@example.com",
+    "address": {
+      "city": "Sydney",
+      "country": "AU"
+    },
+    "signup_date": "2024-06-18",
+    "tier": "standard"
+  },
+  {
+    "customer_id": "CUST-005",
+    "first_name": "Eve",
+    "last_name": "Davis",
+    "email": "eve-at-example.com",
+    "address": {
+      "city": "Paris",
+      "country": "FR"
+    },
+    "signup_date": "2024-08-01",
+    "tier": "gold"
+  }
+]
