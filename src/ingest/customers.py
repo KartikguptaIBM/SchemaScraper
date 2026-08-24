@@ -1,5 +1,6 @@
 """Ingest customers nested JSON → Bronze parquet."""
 from __future__ import annotations
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -13,8 +14,14 @@ from src.transform.schema_check import check_schema
 
 EXPECTED_COLUMNS = [
     "customer_id", "first_name", "last_name", "email",
-    "city", "country", "signup_date", "tier",
+    "address", "signup_date", "tier",
 ]
+
+
+def _row_hash(row: pd.Series, cols: list) -> str:
+    """SHA-256 of pipe-joined string values of business columns (deterministic order)."""
+    joined = "|".join(str(row[c]) for c in cols)
+    return hashlib.sha256(joined.encode()).hexdigest()
 
 
 def ingest_customers(
@@ -22,19 +29,17 @@ def ingest_customers(
     bronze_dir: Path,
     logger: logging.Logger,
 ) -> Path:
-    """Flatten nested JSON export and write to Bronze. Returns output path."""
+    """Read nested JSON export and write to Bronze. Returns output path."""
     src = landing_dir / "customers.json"
     if not src.exists():
         raise IngestionError(f"customers file not found: {src}")
 
     raw = json.loads(src.read_text())
 
-    # Flatten: each record has nested address: {city, country}
+    # FR-1.2: preserve nested address as JSON string; do NOT flatten at Bronze
     rows = []
     for rec in raw:
-        address = rec.pop("address", {})
-        rec["city"] = address.get("city", "")
-        rec["country"] = address.get("country", "")
+        rec["address"] = json.dumps(rec.get("address", {}))
         rows.append(rec)
 
     df = pd.DataFrame(rows)
@@ -42,6 +47,11 @@ def ingest_customers(
 
     check_schema(list(df.columns), EXPECTED_COLUMNS, "customers", logger)
 
+    # FR-1.5: cast all business columns to string (no type inference at Bronze)
+    df = df.astype(str)
+
+    # FR-1.4: metadata columns
+    df["_row_hash"] = df.apply(lambda row: _row_hash(row, EXPECTED_COLUMNS), axis=1)
     df["_source_file"] = src.name
     df["_ingested_at"] = datetime.now(timezone.utc).isoformat()
 

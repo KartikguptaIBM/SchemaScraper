@@ -1,5 +1,6 @@
 """Ingest products from SQLite with watermark-based incremental loading → Bronze parquet."""
 from __future__ import annotations
+import hashlib
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -16,6 +17,12 @@ EXPECTED_COLUMNS = [
     "product_id", "name", "category", "unit_cost", "supplier_id", "updated_at",
 ]
 WATERMARK_KEY = "products_updated_at"
+
+
+def _row_hash(row: pd.Series, cols: list) -> str:
+    """SHA-256 of pipe-joined string values of business columns (deterministic order)."""
+    joined = "|".join(str(row[c]) for c in cols)
+    return hashlib.sha256(joined.encode()).hexdigest()
 
 
 def ingest_products(
@@ -54,6 +61,12 @@ def ingest_products(
 
     check_schema(list(df.columns), EXPECTED_COLUMNS, "products", logger)
 
+    # FR-1.5: cast all business columns to string (no type inference at Bronze)
+    df = df.astype(str)
+
+    # FR-1.4: metadata columns
+    df["_source_file"] = db_path.name
+    df["_row_hash"] = df.apply(lambda row: _row_hash(row, EXPECTED_COLUMNS), axis=1)
     df["_ingested_at"] = datetime.now(timezone.utc).isoformat()
 
     out_dir = bronze_dir / "products"
@@ -61,7 +74,8 @@ def ingest_products(
     out_path = out_dir / "data.parquet"
     df.to_parquet(out_path, index=False)
 
-    new_watermark = str(df["updated_at"].max())
+    # Watermark is already a string after astype(str)
+    new_watermark = df["updated_at"].max()
     state.set_watermark(WATERMARK_KEY, new_watermark)
     log_event(logger, "INFO", "products_watermark_advanced", new_watermark=new_watermark)
 
