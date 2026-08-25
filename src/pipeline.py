@@ -57,11 +57,11 @@ def run_one_date(date_str: str, config: Config) -> dict:
 
         # ── Silver ────────────────────────────────────────────────────────────
         stage("silver_orders",    lambda: build_silver_orders(
-            date_str, config.bronze, config.silver, config.quarantine, logger))
+            date_str, config.bronze, config.silver, config.quarantine, logger, state))
         stage("silver_customers", lambda: build_silver_customers(
-            config.bronze, config.silver, config.quarantine, logger))
+            config.bronze, config.silver, config.quarantine, logger, state))
         stage("silver_products",  lambda: build_silver_products(
-            config.bronze, config.silver, config.quarantine, logger))
+            config.bronze, config.silver, config.quarantine, logger, state))
 
         # ── Gold ──────────────────────────────────────────────────────────────
         stage("dim_product",   lambda: build_dim_product(
