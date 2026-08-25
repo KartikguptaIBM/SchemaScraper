@@ -18,7 +18,6 @@ def check_schema(
     """
     actual = set(df_columns)
     expected = set(expected_columns)
-
     added = actual - expected
     missing = expected - actual
 
