@@ -1,0 +1,54 @@
+FR-3 Silver Validation — New Test Descriptions
+===============================================
+File: tests/test_fr3_silver.py
+
+--------------------------------------------------------------------------------
+test_fr3_1_valid_row_passes_pydantic
+FR: FR-3.1
+Description: Writes a single valid Bronze order row to a parquet fixture and
+  calls build_silver_orders; asserts the row appears in the Silver parquet,
+  confirming it passed Pydantic validation.
+
+--------------------------------------------------------------------------------
+test_fr3_1_invalid_row_caught_by_pydantic
+FR: FR-3.1
+Description: Writes a Bronze order row with quantity=0 (violates the
+  qty_positive Pydantic validator) and calls build_silver_orders; asserts the
+  Silver parquet is empty, confirming the invalid row was caught and excluded.
+
+--------------------------------------------------------------------------------
+test_fr3_2_valid_rows_written_to_silver
+FR: FR-3.2
+Description: Writes two valid Bronze order rows and calls build_silver_orders;
+  asserts both order IDs appear in the Silver parquet at the expected file path,
+  confirming valid rows are persisted to Silver.
+
+--------------------------------------------------------------------------------
+test_fr3_3_invalid_rows_in_quarantine
+FR: FR-3.3
+Description: Writes one valid and one invalid Bronze order row and calls
+  build_silver_orders; asserts a quarantine parquet file exists for orders and
+  contains the invalid row's order_id.
+
+--------------------------------------------------------------------------------
+test_fr3_3_quarantine_reason_column_present
+FR: FR-3.3
+Description: Writes an invalid Bronze order row and calls build_silver_orders;
+  asserts the resulting quarantine parquet contains a column named
+  _quarantine_reason, confirming the error reason is captured per spec.
+
+--------------------------------------------------------------------------------
+test_fr3_4_latest_ingested_at_wins
+FR: FR-3.4
+Description: Writes two Bronze customer rows sharing the same customer_id but
+  with different _ingested_at timestamps (60 seconds apart) and different
+  first_name values; asserts the Silver parquet contains exactly one row and
+  its first_name matches the later-timestamped row ("NewAlice").
+
+--------------------------------------------------------------------------------
+test_fr3_4_earlier_ingested_at_absent
+FR: FR-3.4
+Description: Same setup as the previous test (two duplicate customers with
+  different timestamps); asserts the earlier-timestamped row's first_name
+  ("OldAlice") does not appear in Silver, confirming the stale duplicate was
+  dropped.
