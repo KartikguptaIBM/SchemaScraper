@@ -1,5 +1,6 @@
 """Pydantic schema contracts for Bronze → Silver validation."""
 from __future__ import annotations
+import math
 from datetime import date
 from typing import Optional
 from pydantic import BaseModel, field_validator, ConfigDict
@@ -19,6 +20,8 @@ class OrderRow(BaseModel):
     @field_validator("quantity")
     @classmethod
     def qty_positive(cls, v: int) -> int:
+        if isinstance(v, float) and math.isnan(v):
+            raise ValueError("quantity is not a valid number")
         if v <= 0:
             raise ValueError(f"quantity must be > 0, got {v}")
         return v
@@ -26,6 +29,8 @@ class OrderRow(BaseModel):
     @field_validator("unit_price")
     @classmethod
     def price_positive(cls, v: float) -> float:
+        if math.isnan(v):
+            raise ValueError("unit_price is not a valid number")
         if v < 0:
             raise ValueError(f"unit_price must be >= 0, got {v}")
         return v

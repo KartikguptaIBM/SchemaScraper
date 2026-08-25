@@ -51,6 +51,11 @@ ORDERS = {
         ["order_id","customer_id","product_id","order_date","quantity","unit_price","status"],
         ["ORD-010","CUST-002","PROD-002","2025-11-10","1","199.00","delivered"],
         ["ORD-011","CUST-004","PROD-001","2025-11-10","6","49.99","shipped"],
+        # Both of these should fail
+        ["ORD-012","CUST-004","PROD-001","2025-11-10","6","money","shipped"],
+        ["ORD-011","CUST-004","PROD-001","2025-11-10","6","49.99","shipped"],
+        ["ORD-013","CUST-002","headphones","2025-11-10","6","49.99","shipped"],
+        ["ORD-014","CUST-004","PROD-001","2025-11-10","6","49.99","refund"],
     ],
 }
 
