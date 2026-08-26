@@ -229,3 +229,249 @@ def test_fr3_4_earlier_ingested_at_absent(tmp_path: Path):
 
     df = pd.read_parquet(out)
     assert "OldAlice" not in df["first_name"].values
+
+
+# ---------------------------------------------------------------------------
+# FK check — product_id validation against Silver products catalogue
+# ---------------------------------------------------------------------------
+
+def _write_silver_products(silver_dir: Path, product_ids: list[str]) -> Path:
+    """Write a minimal Silver products parquet containing the given product IDs."""
+    out_dir = silver_dir / "products"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame({
+        "product_id": product_ids,
+        "name": ["Product"] * len(product_ids),
+        "category": ["Cat"] * len(product_ids),
+        "unit_cost": [1.0] * len(product_ids),
+        "supplier_id": ["SUP-A"] * len(product_ids),
+        "updated_at": ["2025-01-01T00:00:00"] * len(product_ids),
+    })
+    path = out_dir / "data.parquet"
+    df.to_parquet(path, index=False)
+    return path
+
+
+def test_fk_valid_product_id_passes(tmp_path: Path):
+    """An order whose product_id exists in the Silver products catalogue reaches Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_products(silver, ["PROD-001"])
+    _write_orders_bronze(bronze, [_good_order("ORD-001")])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 1
+    assert df.iloc[0]["order_id"] == "ORD-001"
+
+
+def test_fk_invalid_product_id_quarantined(tmp_path: Path):
+    """An order whose product_id is not in the Silver products catalogue is quarantined."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_products(silver, ["PROD-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["product_id"] = "PROD-UNKNOWN"
+    _write_orders_bronze(bronze, [bad_order])
+    build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    q_files = list((quarantine / "orders").glob("*.parquet"))
+    assert q_files, "Expected a quarantine file for the FK-violating order"
+    q_df = pd.concat([pd.read_parquet(f) for f in q_files])
+    assert "ORD-BAD" in q_df["order_id"].values
+
+
+def test_fk_invalid_product_id_absent_from_silver(tmp_path: Path):
+    """An order with an unknown product_id must not appear in Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_products(silver, ["PROD-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["product_id"] = "PROD-UNKNOWN"
+    _write_orders_bronze(bronze, [bad_order])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 0
+
+
+def test_fk_quarantine_reason_describes_violation(tmp_path: Path):
+    """The quarantine record for an FK violation includes the offending product_id in the reason."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_products(silver, ["PROD-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["product_id"] = "PROD-UNKNOWN"
+    _write_orders_bronze(bronze, [bad_order])
+    build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    q_files = list((quarantine / "orders").glob("*.parquet"))
+    q_df = pd.concat([pd.read_parquet(f) for f in q_files])
+    reasons = q_df["_quarantine_reason"].tolist()
+    assert any("PROD-UNKNOWN" in r for r in reasons), (
+        f"Expected 'PROD-UNKNOWN' in quarantine reason, got: {reasons}"
+    )
+
+
+def test_fk_mixed_orders_only_valid_reach_silver(tmp_path: Path):
+    """When one order is valid and one has an unknown product_id, only the valid one reaches Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_products(silver, ["PROD-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["product_id"] = "PROD-UNKNOWN"
+    _write_orders_bronze(bronze, [_good_order("ORD-GOOD"), bad_order])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 1
+    assert df.iloc[0]["order_id"] == "ORD-GOOD"
+
+
+def test_fk_no_products_catalogue_passes_all_orders(tmp_path: Path):
+    """When the Silver products parquet does not exist, FK enforcement is skipped
+    and all otherwise-valid orders pass through to Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    # Deliberately do NOT write a silver products parquet
+    _write_orders_bronze(bronze, [_good_order("ORD-001")])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 1
+
+
+# ---------------------------------------------------------------------------
+# FK check — customer_id validation against Silver customers catalogue
+# ---------------------------------------------------------------------------
+
+def _write_silver_customers(silver_dir: Path, customer_ids: list[str]) -> Path:
+    """Write a minimal Silver customers parquet containing the given customer IDs."""
+    out_dir = silver_dir / "customers"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame({
+        "customer_id": customer_ids,
+        "first_name": ["Test"] * len(customer_ids),
+        "last_name": ["User"] * len(customer_ids),
+        "email": [f"user{i}@example.com" for i in range(len(customer_ids))],
+        "city": ["NYC"] * len(customer_ids),
+        "country": ["US"] * len(customer_ids),
+        "signup_date": ["2024-01-01"] * len(customer_ids),
+        "tier": ["standard"] * len(customer_ids),
+    })
+    path = out_dir / "data.parquet"
+    df.to_parquet(path, index=False)
+    return path
+
+
+def test_customer_fk_valid_customer_id_passes(tmp_path: Path):
+    """An order whose customer_id exists in the Silver customers catalogue reaches Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_customers(silver, ["CUST-001"])
+    _write_orders_bronze(bronze, [_good_order("ORD-001")])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 1
+    assert df.iloc[0]["order_id"] == "ORD-001"
+
+
+def test_customer_fk_invalid_customer_id_quarantined(tmp_path: Path):
+    """An order whose customer_id is not in the Silver customers catalogue is quarantined."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_customers(silver, ["CUST-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["customer_id"] = "CUST-UNKNOWN"
+    _write_orders_bronze(bronze, [bad_order])
+    build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    q_files = list((quarantine / "orders").glob("*.parquet"))
+    assert q_files, "Expected a quarantine file for the customer FK-violating order"
+    q_df = pd.concat([pd.read_parquet(f) for f in q_files])
+    assert "ORD-BAD" in q_df["order_id"].values
+
+
+def test_customer_fk_invalid_customer_id_absent_from_silver(tmp_path: Path):
+    """An order with an unknown customer_id must not appear in Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_customers(silver, ["CUST-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["customer_id"] = "CUST-UNKNOWN"
+    _write_orders_bronze(bronze, [bad_order])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 0
+
+
+def test_customer_fk_quarantine_reason_describes_violation(tmp_path: Path):
+    """The quarantine record for a customer FK violation includes the offending customer_id."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_customers(silver, ["CUST-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["customer_id"] = "CUST-UNKNOWN"
+    _write_orders_bronze(bronze, [bad_order])
+    build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    q_files = list((quarantine / "orders").glob("*.parquet"))
+    q_df = pd.concat([pd.read_parquet(f) for f in q_files])
+    reasons = q_df["_quarantine_reason"].tolist()
+    assert any("CUST-UNKNOWN" in r for r in reasons), (
+        f"Expected 'CUST-UNKNOWN' in quarantine reason, got: {reasons}"
+    )
+
+
+def test_customer_fk_mixed_orders_only_valid_reach_silver(tmp_path: Path):
+    """When one order has a valid customer_id and one does not, only the valid one reaches Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    _write_silver_customers(silver, ["CUST-001"])
+    bad_order = _good_order("ORD-BAD")
+    bad_order["customer_id"] = "CUST-UNKNOWN"
+    _write_orders_bronze(bronze, [_good_order("ORD-GOOD"), bad_order])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 1
+    assert df.iloc[0]["order_id"] == "ORD-GOOD"
+
+
+def test_customer_fk_no_customers_catalogue_passes_all_orders(tmp_path: Path):
+    """When the Silver customers parquet does not exist, FK enforcement is skipped
+    and all otherwise-valid orders pass through to Silver."""
+    bronze = tmp_path / "bronze"
+    silver = tmp_path / "silver"
+    quarantine = tmp_path / "quarantine"
+
+    # Deliberately do NOT write a silver customers parquet
+    _write_orders_bronze(bronze, [_good_order("ORD-001")])
+    out = build_silver_orders(DATE, bronze, silver, quarantine, _logger())
+
+    df = pd.read_parquet(out)
+    assert len(df) == 1

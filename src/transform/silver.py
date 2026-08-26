@@ -135,6 +135,133 @@ def _validate_df(
     return pd.DataFrame(good).reset_index(drop=True) if good else pd.DataFrame(columns=df.columns)
 
 
+def _check_fk_products(
+    df: pd.DataFrame,
+    silver_dir: Path,
+    quarantine_dir: Path,
+    logger: logging.Logger,
+    state: StateManager | None = None,
+) -> pd.DataFrame:
+    """Quarantine order rows whose product_id is not in the Silver products catalogue.
+
+    Reads silver/products/data.parquet as the authoritative set of valid product IDs.
+    If the products parquet does not exist (e.g. products stage not yet run, or no
+    products data), all orders pass through with a WARNING — enforcement is skipped
+    rather than blocking the entire orders partition.
+
+    Rows whose _row_hash was already quarantined in a previous run are not re-written.
+    Returns a DataFrame containing only the rows with valid product_ids.
+    """
+    products_path = silver_dir / "products" / "data.parquet"
+    if not products_path.exists():
+        log_event(logger, "WARNING", "silver_orders_fk_check_skipped",
+                  reason="silver products parquet not found")
+        return df
+
+    products_df = pd.read_parquet(products_path)
+    if products_df.empty or "product_id" not in products_df.columns:
+        log_event(logger, "WARNING", "silver_orders_fk_check_skipped",
+                  reason="silver products parquet is empty or missing product_id column")
+        return df
+
+    valid_ids: set[str] = set(products_df["product_id"].astype(str).unique())
+
+    seen_hashes = state.get_quarantined_hashes("orders") if state else set()
+    good, bad, new_hashes = [], [], set()
+
+    df_stripped = _strip_meta(df)
+    for idx, row in df.iterrows():
+        pid = str(df_stripped.loc[idx].get("product_id", ""))
+        if pid in valid_ids:
+            good.append(row)
+        else:
+            row_hash = row.get("_row_hash", "")
+            if row_hash and row_hash in seen_hashes:
+                continue
+            row_dict = df_stripped.loc[idx].to_dict()
+            row_dict["_quarantine_reason"] = (
+                f"foreign key violation: product_id '{pid}' not found in silver products catalogue"
+            )
+            row_dict["_quarantined_at"] = datetime.now(timezone.utc).isoformat()
+            bad.append(row_dict)
+            if row_hash:
+                new_hashes.add(row_hash)
+
+    if bad:
+        q_dir = quarantine_dir / "orders"
+        q_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        pd.DataFrame(bad).to_parquet(q_dir / f"{ts}.parquet", index=False)
+        if state and new_hashes:
+            state.add_quarantined_hashes("orders", new_hashes)
+        log_event(logger, "WARNING", "silver_orders_fk_violations", count=len(bad))
+
+    return pd.DataFrame(good).reset_index(drop=True) if good else pd.DataFrame(columns=df.columns)
+
+
+def _check_fk_customers(
+    df: pd.DataFrame,
+    silver_dir: Path,
+    quarantine_dir: Path,
+    logger: logging.Logger,
+    state: StateManager | None = None,
+) -> pd.DataFrame:
+    """Quarantine order rows whose customer_id is not in the Silver customers catalogue.
+
+    Reads silver/customers/data.parquet as the authoritative set of valid customer IDs.
+    If the customers parquet does not exist or is empty, enforcement is skipped with a
+    WARNING rather than blocking the entire orders partition.
+
+    Rows whose _row_hash was already quarantined in a previous run are not re-written.
+    Returns a DataFrame containing only the rows with valid customer_ids.
+    """
+    customers_path = silver_dir / "customers" / "data.parquet"
+    if not customers_path.exists():
+        log_event(logger, "WARNING", "silver_orders_fk_check_skipped",
+                  reason="silver customers parquet not found")
+        return df
+
+    customers_df = pd.read_parquet(customers_path)
+    if customers_df.empty or "customer_id" not in customers_df.columns:
+        log_event(logger, "WARNING", "silver_orders_fk_check_skipped",
+                  reason="silver customers parquet is empty or missing customer_id column")
+        return df
+
+    valid_ids: set[str] = set(customers_df["customer_id"].astype(str).unique())
+
+    seen_hashes = state.get_quarantined_hashes("orders") if state else set()
+    good, bad, new_hashes = [], [], set()
+
+    df_stripped = _strip_meta(df)
+    for idx, row in df.iterrows():
+        cid = str(df_stripped.loc[idx].get("customer_id", ""))
+        if cid in valid_ids:
+            good.append(row)
+        else:
+            row_hash = row.get("_row_hash", "")
+            if row_hash and row_hash in seen_hashes:
+                continue
+            row_dict = df_stripped.loc[idx].to_dict()
+            row_dict["_quarantine_reason"] = (
+                f"foreign key violation: customer_id '{cid}' not found in silver customers catalogue"
+            )
+            row_dict["_quarantined_at"] = datetime.now(timezone.utc).isoformat()
+            bad.append(row_dict)
+            if row_hash:
+                new_hashes.add(row_hash)
+
+    if bad:
+        q_dir = quarantine_dir / "orders"
+        q_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        pd.DataFrame(bad).to_parquet(q_dir / f"{ts}.parquet", index=False)
+        if state and new_hashes:
+            state.add_quarantined_hashes("orders", new_hashes)
+        log_event(logger, "WARNING", "silver_orders_customer_fk_violations", count=len(bad))
+
+    return pd.DataFrame(good).reset_index(drop=True) if good else pd.DataFrame(columns=df.columns)
+
+
 def build_silver_orders(
     date_str: str,
     bronze_dir: Path,
@@ -156,6 +283,8 @@ def build_silver_orders(
 
     df = _validate_df(df, OrderRow, "order_id", quarantine_dir, logger, "orders", state)
     df = _dedup_by_ingested_at(df, "order_id", quarantine_dir, logger, "orders", state)
+    df = _check_fk_products(df, silver_dir, quarantine_dir, logger, state)
+    df = _check_fk_customers(df, silver_dir, quarantine_dir, logger, state)
     df = _strip_meta(df)
 
     out_dir = silver_dir / "orders" / f"date={date_str}"
