@@ -28,6 +28,7 @@ def ingest_customers(
     landing_dir: Path,
     bronze_dir: Path,
     logger: logging.Logger,
+    run_id: str = "",
 ) -> Path:
     """Read nested JSON export and write to Bronze. Returns output path."""
     src = landing_dir / "customers.json"
@@ -43,9 +44,10 @@ def ingest_customers(
         rows.append(rec)
 
     df = pd.DataFrame(rows)
-    log_event(logger, "INFO", "customers_ingested", rows=len(df))
+    rows_in = len(df)
+    log_event(logger, "INFO", "customers_ingested", rows=rows_in, run_id=run_id)
 
-    check_schema(list(df.columns), EXPECTED_COLUMNS, "customers", logger)
+    check_schema(list(df.columns), EXPECTED_COLUMNS, "customers", logger, run_id)
 
     # FR-1.5: cast all business columns to string (no type inference at Bronze)
     df = df.astype(str)
@@ -60,5 +62,7 @@ def ingest_customers(
     out_path = out_dir / "data.parquet"
     df.to_parquet(out_path, index=False)
 
-    log_event(logger, "INFO", "customers_bronze_written", path=str(out_path), rows=len(df))
+    log_event(logger, "INFO", "customers_bronze_written", path=str(out_path),
+              stage="bronze", rows_in=rows_in, rows_out=len(df), rows_quarantined=0,
+              run_id=run_id)
     return out_path
