@@ -30,6 +30,7 @@ def ingest_products(
     bronze_dir: Path,
     state: StateManager,
     logger: logging.Logger,
+    run_id: str = "",
 ) -> Path:
     """
     Incrementally load only rows newer than the stored watermark.
@@ -39,7 +40,7 @@ def ingest_products(
         raise IngestionError(f"products DB not found: {db_path}")
 
     watermark = state.get_watermark(WATERMARK_KEY) or "1970-01-01T00:00:00"
-    log_event(logger, "INFO", "products_watermark_read", watermark=watermark)
+    log_event(logger, "INFO", "products_watermark_read", watermark=watermark, run_id=run_id)
 
     conn = sqlite3.connect(db_path)
     try:
@@ -51,15 +52,16 @@ def ingest_products(
     finally:
         conn.close()
 
-    log_event(logger, "INFO", "products_ingested", rows=len(df), since=watermark)
+    rows_in = len(df)
+    log_event(logger, "INFO", "products_ingested", rows=rows_in, since=watermark, run_id=run_id)
 
     if df.empty:
-        log_event(logger, "INFO", "products_no_new_rows")
+        log_event(logger, "INFO", "products_no_new_rows", run_id=run_id)
         out_dir = bronze_dir / "products"
         out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir / "data.parquet"
 
-    check_schema(list(df.columns), EXPECTED_COLUMNS, "products", logger)
+    check_schema(list(df.columns), EXPECTED_COLUMNS, "products", logger, run_id)
 
     # FR-1.5: cast all business columns to string (no type inference at Bronze)
     df = df.astype(str)
@@ -77,6 +79,8 @@ def ingest_products(
     # Watermark is already a string after astype(str)
     new_watermark = df["updated_at"].max()
     state.set_watermark(WATERMARK_KEY, new_watermark)
-    log_event(logger, "INFO", "products_watermark_advanced", new_watermark=new_watermark)
+    log_event(logger, "INFO", "products_watermark_advanced", new_watermark=new_watermark,
+              stage="bronze", rows_in=rows_in, rows_out=len(df), rows_quarantined=0,
+              run_id=run_id)
 
     return out_path

@@ -23,12 +23,12 @@ def _row_hash(row: pd.Series, cols: list) -> str:
     return hashlib.sha256(joined.encode()).hexdigest()
 
 
-def _read_csv_with_fallback(src: Path, logger: logging.Logger) -> pd.DataFrame:
+def _read_csv_with_fallback(src: Path, logger: logging.Logger, run_id: str = "") -> pd.DataFrame:
     """Try UTF-8 first; fall back to Latin-1 on decode error."""
     try:
         return pd.read_csv(src, encoding="utf-8")
     except UnicodeDecodeError:
-        log_event(logger, "INFO", "orders_encoding_fallback", file=src.name)
+        log_event(logger, "INFO", "orders_encoding_fallback", file=src.name, run_id=run_id)
         try:
             return pd.read_csv(src, encoding="latin-1")
         except Exception as exc:
@@ -40,16 +40,18 @@ def ingest_orders(
     landing_dir: Path,
     bronze_dir: Path,
     logger: logging.Logger,
+    run_id: str = "",
 ) -> Path:
     """Read orders_YYYY-MM-DD.csv and write to Bronze layer. Returns output path."""
     src = landing_dir / f"orders_{date_str}.csv"
     if not src.exists():
         raise IngestionError(f"orders file not found: {src}")
 
-    df = _read_csv_with_fallback(src, logger)
-    log_event(logger, "INFO", "orders_ingested", date=date_str, rows=len(df))
+    df = _read_csv_with_fallback(src, logger, run_id)
+    rows_in = len(df)
+    log_event(logger, "INFO", "orders_ingested", date=date_str, rows=rows_in, run_id=run_id)
 
-    check_schema(list(df.columns), EXPECTED_COLUMNS, "orders", logger)
+    check_schema(list(df.columns), EXPECTED_COLUMNS, "orders", logger, run_id)
 
     # FR-1.5: cast all business columns to string (no type inference at Bronze)
     df = df.astype(str)
@@ -65,5 +67,7 @@ def ingest_orders(
     out_path = out_dir / "data.parquet"
     df.to_parquet(out_path, index=False)
 
-    log_event(logger, "INFO", "orders_bronze_written", path=str(out_path), rows=len(df))
+    log_event(logger, "INFO", "orders_bronze_written", path=str(out_path),
+              stage="bronze", rows_in=rows_in, rows_out=len(df), rows_quarantined=0,
+              run_id=run_id)
     return out_path

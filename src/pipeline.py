@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 import argparse
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from src.transform.gold import (
 
 
 def run_one_date(date_str: str, config: Config) -> dict:
+    run_id = str(uuid.uuid4())
     logger = get_logger("novacart", config.logs)
     state = StateManager(config.state)
     started_at = datetime.now(timezone.utc)
@@ -49,29 +51,29 @@ def run_one_date(date_str: str, config: Config) -> dict:
     try:
         # ── Bronze ────────────────────────────────────────────────────────────
         stage("ingest_orders",    lambda: ingest_orders(
-            date_str, config.landing_orders, config.bronze, logger))
+            date_str, config.landing_orders, config.bronze, logger, run_id))
         stage("ingest_customers", lambda: ingest_customers(
-            config.landing_customers, config.bronze, logger))
+            config.landing_customers, config.bronze, logger, run_id))
         stage("ingest_products",  lambda: ingest_products(
-            config.landing_products_db, config.bronze, state, logger))
+            config.landing_products_db, config.bronze, state, logger, run_id))
 
         # ── Silver ────────────────────────────────────────────────────────────
         stage("silver_orders",    lambda: build_silver_orders(
-            date_str, config.bronze, config.silver, config.quarantine, logger, state))
+            date_str, config.bronze, config.silver, config.quarantine, logger, state, run_id))
         stage("silver_customers", lambda: build_silver_customers(
-            config.bronze, config.silver, config.quarantine, logger, state))
+            config.bronze, config.silver, config.quarantine, logger, state, run_id))
         stage("silver_products",  lambda: build_silver_products(
-            config.bronze, config.silver, config.quarantine, logger, state))
+            config.bronze, config.silver, config.quarantine, logger, state, run_id))
 
         # ── Gold ──────────────────────────────────────────────────────────────
         stage("dim_product",   lambda: build_dim_product(
-            config.silver, config.gold, logger))
+            config.silver, config.gold, logger, run_id))
         stage("dim_customer",  lambda: build_dim_customer(
             config.silver, config.gold,
             config.gold_cfg.get("scd2_track_fields", ["city", "country", "email"]),
-            logger))
+            logger, run_id))
         stage("fact_orders",   lambda: build_fact_orders(
-            date_str, config.silver, config.gold, logger))
+            date_str, config.silver, config.gold, logger, run_id))
 
     except Exception as exc:
         status = "FAIL"
@@ -79,6 +81,7 @@ def run_one_date(date_str: str, config: Config) -> dict:
 
     finished_at = datetime.now(timezone.utc)
     metadata = {
+        "run_id": run_id,
         "date": date_str,
         "status": status,
         "error": error_msg,
@@ -88,7 +91,7 @@ def run_one_date(date_str: str, config: Config) -> dict:
         "stages": stages,
     }
     state.record_run(metadata)
-    log_event(logger, "INFO", "pipeline_end",
+    log_event(logger, "INFO", "pipeline_end", stage="pipeline",
               **{k: v for k, v in metadata.items() if k != "stages"})
     return metadata
 
