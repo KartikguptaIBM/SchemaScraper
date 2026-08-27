@@ -61,7 +61,7 @@ def ingest_products(
         out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir / "data.parquet"
 
-    check_schema(list(df.columns), EXPECTED_COLUMNS, "products", logger, run_id)
+    check_schema(list(df.columns), EXPECTED_COLUMNS, "products", logger)
 
     # FR-1.5: cast all business columns to string (no type inference at Bronze)
     df = df.astype(str)
