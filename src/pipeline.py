@@ -22,6 +22,7 @@ from src.transform.silver import (
     build_silver_products,
 )
 from src.transform.gold import (
+    build_dim_date,
     build_dim_product,
     build_dim_customer,
     build_fact_orders,
@@ -64,6 +65,7 @@ def run_one_date(date_str: str, config: Config) -> dict:
             config.bronze, config.silver, config.quarantine, logger, state))
 
         # ── Gold ──────────────────────────────────────────────────────────────
+        stage("dim_date",      lambda: build_dim_date(config.gold, logger))
         stage("dim_product",   lambda: build_dim_product(
             config.silver, config.gold, logger))
         stage("dim_customer",  lambda: build_dim_customer(
