@@ -17,6 +17,32 @@ def _row_hash(row: pd.Series, fields: list[str]) -> str:
     return hashlib.md5(val.encode()).hexdigest()
 
 
+# ── dim_date: static calendar dimension ─────────────────────────────────────
+
+def build_dim_date(gold_dir: Path, logger: logging.Logger) -> Path:
+    gold_dir.mkdir(parents=True, exist_ok=True)
+    out_path = gold_dir / "dim_date.parquet"
+
+    dates = pd.date_range(start="2024-01-01", end="2026-12-31", freq="D")
+    s = pd.Series(dates)
+    df = pd.DataFrame({
+        "year":        s.dt.year,
+        "month":       s.dt.month,
+        "day":         s.dt.day,
+        "quarter":     s.dt.quarter,
+        "week":        s.dt.isocalendar().week.astype(int),
+        "day_of_week": s.dt.dayofweek,
+        "day_name":    s.dt.day_name(),
+        "month_name":  s.dt.month_name(),
+        "is_weekend":  s.dt.dayofweek >= 5,
+    })
+    df["date_key"] = s.dt.date
+
+    df.to_parquet(out_path, index=False)
+    log_event(logger, "INFO", "dim_date_written", rows=len(df))
+    return out_path
+
+
 # ── dim_product: SCD Type 1 (overwrite) ─────────────────────────────────────
 
 def build_dim_product(
@@ -138,7 +164,7 @@ def build_fact_orders(
     df = df[[c for c in df.columns if not c.startswith("_")]].copy()
 
     # Derived metrics
-    df["order_date"] = pd.to_datetime(df["order_date"])
+    df["order_date"] = pd.to_datetime(df["order_date"]).dt.date
     df["total_amount"] = df["quantity"] * df["unit_price"]
 
     # Idempotent: full replace of this date partition
