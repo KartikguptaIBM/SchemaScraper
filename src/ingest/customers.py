@@ -47,7 +47,7 @@ def ingest_customers(
     rows_in = len(df)
     log_event(logger, "INFO", "customers_ingested", rows=rows_in, run_id=run_id)
 
-    check_schema(list(df.columns), EXPECTED_COLUMNS, "customers", logger, run_id)
+    check_schema(list(df.columns), EXPECTED_COLUMNS, "customers", logger)
 
     # FR-1.5: cast all business columns to string (no type inference at Bronze)
     df = df.astype(str)

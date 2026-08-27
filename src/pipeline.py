@@ -59,21 +59,21 @@ def run_one_date(date_str: str, config: Config) -> dict:
 
         # ── Silver ────────────────────────────────────────────────────────────
         stage("silver_orders",    lambda: build_silver_orders(
-            date_str, config.bronze, config.silver, config.quarantine, logger, state, run_id))
+            date_str, config.bronze, config.silver, config.quarantine, logger, state))
         stage("silver_customers", lambda: build_silver_customers(
-            config.bronze, config.silver, config.quarantine, logger, state, run_id))
+            config.bronze, config.silver, config.quarantine, logger, state))
         stage("silver_products",  lambda: build_silver_products(
-            config.bronze, config.silver, config.quarantine, logger, state, run_id))
+            config.bronze, config.silver, config.quarantine, logger, state))
 
         # ── Gold ──────────────────────────────────────────────────────────────
         stage("dim_product",   lambda: build_dim_product(
-            config.silver, config.gold, logger, run_id))
+            config.silver, config.gold, logger))
         stage("dim_customer",  lambda: build_dim_customer(
             config.silver, config.gold,
             config.gold_cfg.get("scd2_track_fields", ["city", "country", "email"]),
-            logger, run_id))
+            logger))
         stage("fact_orders",   lambda: build_fact_orders(
-            date_str, config.silver, config.gold, logger, run_id))
+            date_str, config.silver, config.gold, logger))
 
     except Exception as exc:
         status = "FAIL"
